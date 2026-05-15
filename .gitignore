@@ -1,0 +1,21 @@
+# Build files
+build/
+*.o
+*.out
+*.exe
+
+# Executables
+src/analyzer
+analyzer
+
+# Large input/output files
+data/*.txt
+*.log
+*.idx
+*.dat
+
+# Mac files
+.DS_Store
+
+# VS Code
+.vscode/
