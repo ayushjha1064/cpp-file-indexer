@@ -7,6 +7,8 @@
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{placeins}
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric}
@@ -25,6 +27,7 @@
 \date{17 August 2026}
 
 \begin{document}
+\flushbottom
 \maketitle
 
 \begin{abstract}
@@ -40,7 +43,6 @@ case and that worker-local indexing scales to 4.80x at eight workers.
 \end{abstract}
 
 \tableofcontents
-\newpage
 
 \section{Project Goal and Scope}
 
@@ -73,24 +75,23 @@ No external runtime dependency was added. The repository provides a
 \section{Architecture}
 
 \begin{center}
+\resizebox{\textwidth}{!}{%
 \begin{tikzpicture}[
-  node distance=1.0cm and 1.1cm,
+  node distance=0.75cm,
   component/.style={draw, rounded corners, fill=blue!8, minimum width=2.2cm,
-                    minimum height=0.8cm, align=center},
-  store/.style={draw, rounded corners, fill=green!10, minimum width=2.4cm,
-                minimum height=0.8cm, align=center},
+                    minimum height=1.0cm, align=center},
+  store/.style={draw, rounded corners, fill=green!10, minimum width=2.25cm,
+                minimum height=1.0cm, align=center},
   arrow/.style={-{Stealth[length=2.2mm]}, thick}
 ]
-  \node[component] (input) {Large log file};
-  \node[component, below=of input] (reader) {POSIX read()\\or mmap()};
-  \node[component, below=of reader] (producer) {Delimiter-aligned\\producer};
-  \node[component, below=of producer] (queue) {Bounded blocking\\queue};
-  \node[component, below left=1.1cm and 1.4cm of queue] (workers)
-        {Worker threads\\tokenize + index};
-  \node[store, below right=1.1cm and 1.4cm of queue] (merge)
-        {Serial merge\\WordIndex};
-  \node[store, below=of merge] (persistent) {Persistent version\\optional};
-  \node[component, below=of persistent] (query) {Query engine\\word / Top-K / diff};
+  \node[component] (input) {Large\\log file};
+  \node[component, right=of input] (reader) {POSIX read()\\or mmap()};
+  \node[component, right=of reader] (producer) {Delimiter-aligned\\producer};
+  \node[component, right=of producer] (queue) {Bounded\\queue};
+  \node[component, right=of queue] (workers) {Worker pool\\tokenize + index};
+  \node[store, right=of workers] (merge) {Serial\\merge};
+  \node[store, right=of merge] (persistent) {Atomic\\persistence};
+  \node[component, right=of persistent] (query) {Query\\engine};
 
   \draw[arrow] (input) -- (reader);
   \draw[arrow] (reader) -- (producer);
@@ -100,6 +101,7 @@ No external runtime dependency was added. The repository provides a
   \draw[arrow] (merge) -- (persistent);
   \draw[arrow] (persistent) -- (query);
 \end{tikzpicture}
+}
 \end{center}
 
 The default path runs in one process. With \texttt{--process-indexer}, the
@@ -109,6 +111,13 @@ executes the same binary in an internal export mode, and the completed
 protocol. This optional mode improves fault isolation and establishes a
 service-like boundary; it is not intended to maximize throughput because a
 complete index must be serialized.
+
+\paragraph{Pipeline invariants.}
+Chunks are emitted only at token delimiters, the queue bounds in-flight work,
+workers never share mutable frequency maps, and a version is visible on disk
+only after its atomic persistence transaction completes. These invariants
+connect correctness, backpressure, concurrency, and crash recovery in one
+end-to-end flow.
 
 \section{Input and Token Correctness}
 
@@ -252,7 +261,7 @@ that condition rather than inventing a value.
 
 \subsection{Reader mode comparison}
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Single-worker reader benchmark, warmed 64 MiB input. Lower latency and
 higher throughput are better.}
@@ -266,7 +275,7 @@ Reader & Average latency (s) & Throughput (MiB/s) \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
@@ -289,10 +298,11 @@ Reader & Average latency (s) & Throughput (MiB/s) \\
 \caption{The \texttt{mmap} mode was about 6.6\% faster in this warmed,
 single-worker workload.}
 \end{figure}
+\FloatBarrier
 
 \subsection{Worker scaling with \texttt{mmap}}
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{\texttt{mmap} scaling benchmark, warmed 64 MiB input.}
 \begin{tabular}{rrrr}
@@ -307,7 +317,7 @@ Workers & Average latency (s) & Throughput (MiB/s) & Speedup \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
@@ -334,8 +344,7 @@ Workers & Average latency (s) & Throughput (MiB/s) & Speedup \\
 \caption{Scaling is strong but sublinear. At eight workers, the serial producer,
 memory subsystem, and final merge increasingly limit throughput.}
 \end{figure}
-
-\clearpage
+\FloatBarrier
 \section{Interpretation and Bottlenecks}
 
 The measurements show three useful conclusions:
