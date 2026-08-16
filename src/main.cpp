@@ -1,5 +1,7 @@
 #include "cli.h"
 #include "index.h"
+#include "process_indexer.h"
+#include "persistent_index.h"
 #include "queries.h"
 
 #include <chrono>
@@ -7,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <unistd.h>
 
 using namespace std;
 using Clock = chrono::high_resolution_clock;
@@ -20,14 +23,39 @@ int main(int argc, char** argv) {
             return 0;
         }
 
+        size_t bufferBytes = a.bufferKB * 1024;
+        ReaderMode readerMode = a.readerMode == "mmap" ? ReaderMode::MMap : ReaderMode::Read;
+
+        if (a.internalExportIndex) {
+            VersionStore childStore;
+            childStore.buildVersionFromFile("internal", a.file, bufferBytes, readerMode, a.workerCount);
+            writeWordIndexToFd(STDOUT_FILENO, childStore.get("internal"));
+            return 0;
+        }
+
         auto start = Clock::now();
 
         VersionStore store;
         unique_ptr<Query> query;
-        size_t bufferBytes = a.bufferKB * 1024;
+        const auto buildVersion = [&](const string& versionName, const string& filePath) {
+            if (a.loadIndex) {
+                store.addVersion(versionName, loadVersionFromDisk(a.indexDirectory, versionName));
+                return;
+            }
+            if (a.processIndexer) {
+                store.addVersion(versionName,
+                                 buildIndexInChildProcess(argv[0], filePath, bufferBytes,
+                                                          readerMode, a.workerCount));
+            } else {
+                store.buildVersionFromFile(versionName, filePath, bufferBytes, readerMode, a.workerCount);
+            }
+            if (!a.indexDirectory.empty()) {
+                saveVersionAtomically(a.indexDirectory, versionName, store.get(versionName));
+            }
+        };
 
         if (a.queryType == "word") {
-            store.buildVersionFromFile(a.version, a.file, bufferBytes);
+            buildVersion(a.version, a.file);
             query = make_unique<WordCountQuery>(a.version, a.word);
 
             // Strict output format
@@ -44,7 +72,7 @@ int main(int argc, char** argv) {
         }
 
         if (a.queryType == "top") {
-            store.buildVersionFromFile(a.version, a.file, bufferBytes);
+            buildVersion(a.version, a.file);
             query = make_unique<TopKQuery>(a.version, a.k);
 
             // Strict output format
@@ -60,8 +88,8 @@ int main(int argc, char** argv) {
         }
 
         if (a.queryType == "diff") {
-            store.buildVersionFromFile(a.version1, a.file1, bufferBytes);
-            store.buildVersionFromFile(a.version2, a.file2, bufferBytes);
+            buildVersion(a.version1, a.file1);
+            buildVersion(a.version2, a.file2);
             query = make_unique<DiffQuery>(a.version1, a.version2, a.word);
 
             // Strict output format

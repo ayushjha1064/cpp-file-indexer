@@ -1,4 +1,6 @@
 #pragma once
+#include "reader.h"
+
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -10,6 +12,8 @@ using namespace std;
 class WordIndex {
 public:
     void add(const string& word);
+    void addCount(const string& word, long long count);
+    void mergeFrom(const WordIndex& other);
 
     // Overloading requirement
     long long getCount(const string& word) const;
@@ -26,7 +30,10 @@ class VersionStore {
 public:
     void buildVersionFromFile(const string& versionName,
                               const string& filePath,
-                              size_t bufferBytes);
+                              size_t bufferBytes,
+                              ReaderMode readerMode = ReaderMode::Read,
+                              size_t workerCount = 1);
+    void addVersion(const string& versionName, WordIndex index);
 
     bool hasVersion(const string& versionName) const noexcept;
     const WordIndex& get(const string& versionName) const;

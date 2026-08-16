@@ -9,6 +9,12 @@ struct Args {
     // ("topk" is accepted as an alias and normalized to "top".)
     string queryType;
     size_t bufferKB = 256; // default 256KB
+    string readerMode = "read";
+    size_t workerCount = 1;
+    bool processIndexer = false;
+    bool internalExportIndex = false;
+    string indexDirectory;
+    bool loadIndex = false;
 
     // word/top
     string file, version, word;
